@@ -1,1 +1,1 @@
-# SMMS_Encoder-Counter
+# SMMS_Encoder_Counter
