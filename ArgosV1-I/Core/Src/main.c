@@ -27,19 +27,19 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
-#include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef struct _paramType {
-	float wheelRadius; // 1
-	uint32_t encoderPulseCount; // 2
-	float targetDistance; // 3
-} __attribute__((aligned(1), packed)) WheelParam;
-WheelParam wP;
+typedef struct wheel_param
+{
+	float car_w_rad; // Car Wheel Radius >> 0.275(m)
+	float tgt_dist; // Target Distance (Camera Action) >> 5.0(m)
+	uint32_t one_rot_enc_pls; // 1 rotation encoder pulse value >> 2000
+} __attribute__((aligned(1), packed)) wheel_param_t;
+wheel_param_t wp;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -62,15 +62,16 @@ WheelParam wP;
 
 /* USER CODE BEGIN PV */
 SPI_HandleTypeDef hspi1;
-int A_PLS_CNT = 0;
-int B_PLS_CNT = 0;
+int a_pls_cnt = 0;
+int b_pls_cnt = 0;
 
-bool bFlag = false;
-uint8_t saveFlag = 0; // Data select
+uint8_t run_f = 0;
+uint8_t save_f = 0; // Data select
 
-int goFlag = 0;
-char spirxbuf[20] = { 0 };
-int encoderTargetCount = -1;
+uint8_t spi_rx_f = 0;
+char spi_rx_buf[20] =
+{ 0 };
+int enc_val_for_photo_dist = -1; // Encoder value for photo distance
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -82,25 +83,29 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
-	if (hspi->Instance == hspi1.Instance) {
-		HAL_SPI_Receive_IT(&hspi1, (uint8_t*) &wP, sizeof(wP));
-		goFlag = 1;
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+	if (hspi->Instance == hspi1.Instance)
+	{
+		HAL_SPI_Receive_IT(&hspi1, (uint8_t*) &wp, sizeof(wp));
+		spi_rx_f = 1;
 	}
 }
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-	switch (GPIO_Pin) {
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+	switch (GPIO_Pin)
+	{
 	case GPIO_PIN_5:
 		HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_0);
 		//if (bFlag) {
-			A_PLS_CNT++;
+		a_pls_cnt++;
 		//}
 		break;
 	case GPIO_PIN_6:
 		HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_1);
 		//if (bFlag) {
-			B_PLS_CNT++;
+		b_pls_cnt++;
 		//}
 		break;
 	case GPIO_PIN_7:
@@ -112,20 +117,24 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	//HAL_GPIO_WritePin(GPIOB,GPIO_PIN_0,RESET);
 }
 
-float diameter(float radius) {
+float diameter(float radius)
+{
 	return (2 * 3.1415 * radius);
 }
 
-float rotationForShoot(float targetDistance, float wheelDiameter) {
-	return (targetDistance / wheelDiameter);
+float n_of_rot_to_photo_dist(float tgt_dist, float w_diameter)
+{
+	return (tgt_dist / w_diameter);
 }
 
-int targetPulseCount(float rotationCount, int encoderPulseCnt) {
-	return (int) ((((rotationCount * encoderPulseCnt) / TARGET_PULSE_NUMBER)
+int tgt_pls_cnt(float w_turn_enc_pls, int enc_pls_f)
+{
+	return (int) ((((w_turn_enc_pls * enc_pls_f) / TARGET_PULSE_NUMBER)
 			/ DIVISOR));
 }
 
-void SaveWheelParam(WheelParam *wP) {
+void save_w_param(wheel_param_t *wp)
+{
 	HAL_FLASH_Unlock();
 	{
 		FLASH_EraseInitTypeDef fler;
@@ -135,9 +144,10 @@ void SaveWheelParam(WheelParam *wP) {
 		fler.Page = 63;
 		fler.NbPages = 1;
 		HAL_FLASHEx_Erase(&fler, &perr);
-		register uint64_t *_targetAddr = (uint64_t*) (wP);
-		for (uint8_t i = 0; i <= (sizeof(WheelParam) * 2); i +=
-				sizeof(uint64_t)) {
+		register uint64_t *_targetAddr = (uint64_t*) (wp);
+		for (uint8_t i = 0; i <= (sizeof(wheel_param_t) * 2); i +=
+				sizeof(uint64_t))
+		{
 			HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
 			BACKUP_FLASH_ADDR + i, _targetAddr[i / sizeof(uint64_t)]);
 		}
@@ -151,17 +161,18 @@ void SaveWheelParam(WheelParam *wP) {
  * @brief  The application entry point.
  * @retval int
  */
-int main(void) {
+int main(void)
+{
 	/* USER CODE BEGIN 1 */
-	memcpy(&wP, (void*) (BACKUP_FLASH_ADDR), sizeof(WheelParam));
+	memcpy(&wp, (void*) (BACKUP_FLASH_ADDR), sizeof(wheel_param_t));
 	//2nd, compare memory
-	/*if (wP.encoderPulseCount == 0xFFFFFFFF)
+	/*if (wp.encoderPulseCount == 0xFFFFFFFF)
 	 {
 	 //if flash not initialized, set value to default
-	 wP.encoderPulseCount = 2000;
-	 wP.targetDistance = 5.0;
-	 wP.wheelRadius = 0.324;
-	 SaveWheelParam(&wP);
+	 wp.encoderPulseCount = 2000;
+	 wp.targetDistance = 5.0;
+	 wp.wheelRadius = 0.324;
+	 SaveWheelParam(&wp);
 	 }*/
 	//int encoderTargetCount = -1;
 	/* USER CODE END 1 */
@@ -188,54 +199,57 @@ int main(void) {
 	/* USER CODE BEGIN 2 */
 	LL_TIM_EnableIT_UPDATE(TIM3);
 
-	HAL_SPI_Receive_IT(&hspi1, (uint8_t*) &wP, sizeof(wP));
+	HAL_SPI_Receive_IT(&hspi1, (uint8_t*) &wp, sizeof(wp));
 
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
 	HAL_Delay(100);
-	encoderTargetCount = targetPulseCount(
-			rotationForShoot(wP.targetDistance, diameter(wP.wheelRadius)),
-			wP.encoderPulseCount);
+	enc_val_for_photo_dist = tgt_pls_cnt(
+			n_of_rot_to_photo_dist(wp.tgt_dist, diameter(wp.car_w_rad)),
+			wp.one_rot_enc_pls);
 
-	while (1) {
-		//HAL_SPI_Receive(&hspi1, (uint8_t*) &wP, sizeof(wP), 1000);
-		HAL_SPI_Receive_IT(&hspi1, (uint8_t*) &wP, sizeof(wP));
+	while (1)
+	{
+		//HAL_SPI_Receive(&hspi1, (uint8_t*) &wp, sizeof(wp), 1000);
+		HAL_SPI_Receive_IT(&hspi1, (uint8_t*) &wp, sizeof(wp));
 
-		if (goFlag == 1) {
+		if (spi_rx_f == 1)
+		{
 			// R
-			HAL_SPI_Receive(&hspi1, (uint8_t*) &wP.wheelRadius,
-					sizeof(wP.wheelRadius), 1000);
-			//wP.wheelRadius = atof(&wP.wheelRadius);
+			HAL_SPI_Receive(&hspi1, (uint8_t*) &wp.car_w_rad,
+					sizeof(wp.car_w_rad), 1000);
+			//wp.wheelRadius = atof(&wp.wheelRadius);
 
 			// E
-			HAL_SPI_Receive(&hspi1, (uint8_t*) &wP.encoderPulseCount,
-					sizeof(wP.encoderPulseCount), 1000);
-			//wP.encoderPulseCount = atoi(&wP.encoderPulseCount);
+			HAL_SPI_Receive(&hspi1, (uint8_t*) &wp.one_rot_enc_pls,
+					sizeof(wp.one_rot_enc_pls), 1000);
+			//wp.encoderPulseCount = atoi(&wp.encoderPulseCount);
 
 			// T
-			HAL_SPI_Receive(&hspi1, (uint8_t*) &wP.targetDistance,
-					sizeof(wP.targetDistance), 1000);
-			//wP.targetDistance = atof(&wP.targetDistance);
+			HAL_SPI_Receive(&hspi1, (uint8_t*) &wp.tgt_dist,
+					sizeof(wp.tgt_dist), 1000);
+			//wp.targetDistance = atof(&wp.targetDistance);
 
-			encoderTargetCount = targetPulseCount(
-					rotationForShoot(wP.targetDistance,
-							diameter(wP.wheelRadius)), wP.encoderPulseCount);
-			goFlag = 0;
-			SaveWheelParam(&wP);
+			enc_val_for_photo_dist = tgt_pls_cnt(
+					n_of_rot_to_photo_dist(wp.tgt_dist, diameter(wp.car_w_rad)),
+					wp.one_rot_enc_pls);
+			spi_rx_f = 0;
+			save_w_param(&wp);
 		}
 
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
-		if (A_PLS_CNT >= encoderTargetCount) {
-			A_PLS_CNT = 0;
-			B_PLS_CNT = 0;
+		if (a_pls_cnt >= enc_val_for_photo_dist)
+		{
+			a_pls_cnt = 0;
+			b_pls_cnt = 0;
 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, SET); // Main Interrupt
 			LL_TIM_ClearFlag_UPDATE(TIM3);
 			LL_TIM_EnableCounter(TIM3);
-			char __buf = 0xEE;
+			//char __buf = 0xEE;
 		}
 	}
 	/* USER CODE END 3 */
@@ -245,9 +259,12 @@ int main(void) {
  * @brief System Clock Configuration
  * @retval None
  */
-void SystemClock_Config(void) {
-	RCC_OscInitTypeDef RCC_OscInitStruct = { 0 };
-	RCC_ClkInitTypeDef RCC_ClkInitStruct = { 0 };
+void SystemClock_Config(void)
+{
+	RCC_OscInitTypeDef RCC_OscInitStruct =
+	{ 0 };
+	RCC_ClkInitTypeDef RCC_ClkInitStruct =
+	{ 0 };
 
 	/** Configure the main internal regulator output voltage
 	 */
@@ -264,7 +281,8 @@ void SystemClock_Config(void) {
 	RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
 	RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
 	RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
-	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
+	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+	{
 		Error_Handler();
 	}
 	/** Initializes the CPU, AHB and APB busses clocks
@@ -276,7 +294,8 @@ void SystemClock_Config(void) {
 	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
 	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_8) != HAL_OK) {
+	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_8) != HAL_OK)
+	{
 		Error_Handler();
 	}
 }
@@ -289,7 +308,8 @@ void SystemClock_Config(void) {
  * @brief  This function is executed in case of error occurrence.
  * @retval None
  */
-void Error_Handler(void) {
+void Error_Handler(void)
+{
 	/* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 
